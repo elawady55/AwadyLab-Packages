@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "dgSpecHash": "HVnAgKJ3D6k=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Awady\\Repos\\a1-packages\\AwadyLab.ConfigurationUtilities\\SampleApp\\SampleApp.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Awady\\.nuget\\packages\\awadylab.configurationutilities\\1.0.8\\awadylab.configurationutilities.1.0.8.nupkg.sha512",
+    "C:\\Users\\Awady\\.nuget\\packages\\fluentvalidation\\11.11.0\\fluentvalidation.11.11.0.nupkg.sha512",
+    "C:\\Users\\Awady\\.nuget\\packages\\fluentvalidation.aspnetcore\\11.3.1\\fluentvalidation.aspnetcore.11.3.1.nupkg.sha512",
+    "C:\\Users\\Awady\\.nuget\\packages\\fluentvalidation.dependencyinjectionextensions\\11.11.0\\fluentvalidation.dependencyinjectionextensions.11.11.0.nupkg.sha512",
+    "C:\\Users\\Awady\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.1\\microsoft.aspnetcore.openapi.10.0.1.nupkg.sha512",
+    "C:\\Users\\Awady\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\2.1.0\\microsoft.extensions.dependencyinjection.abstractions.2.1.0.nupkg.sha512",
+    "C:\\Users\\Awady\\.nuget\\packages\\microsoft.openapi\\2.0.0\\microsoft.openapi.2.0.0.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1903",
+      "level": "Warning",
+      "message": "Package 'Microsoft.OpenApi' 2.0.0 has a known high severity vulnerability, https://github.com/advisories/GHSA-v5pm-xwqc-g5wc",
+      "projectPath": "C:\\Users\\Awady\\Repos\\a1-packages\\AwadyLab.ConfigurationUtilities\\SampleApp\\SampleApp.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\Awady\\Repos\\a1-packages\\AwadyLab.ConfigurationUtilities\\SampleApp\\SampleApp.csproj",
+      "libraryId": "Microsoft.OpenApi",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}
