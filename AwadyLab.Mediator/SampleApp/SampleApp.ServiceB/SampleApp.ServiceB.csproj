@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <InvariantGlobalization>true</InvariantGlobalization>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="StackExchange.Redis" Version="2.8.24" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\AwadyLab.Mediator\AwadyLab.Mediator.csproj" />
+        <ProjectReference Include="..\..\AwadyLab.Mediator.RabbitMQ\AwadyLab.Mediator.RabbitMQ.csproj" />
+        <ProjectReference Include="..\..\AwadyLab.Mediator.Redis\AwadyLab.Mediator.Redis.csproj" />
+        <ProjectReference Include="..\SampleApp.Contracts\SampleApp.Contracts.csproj" />
+    </ItemGroup>
+
+</Project>

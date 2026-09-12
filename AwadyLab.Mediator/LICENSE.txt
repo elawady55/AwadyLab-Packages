@@ -1,0 +1,27 @@
+﻿AwadyLab.Mediator License
+
+Copyright (c) Mohamed Elawady. All rights reserved.
+
+This software is closed source and proprietary. Subject to the terms below,
+you are granted a free, worldwide, non-exclusive license to:
+
+  - Use this software, in source or compiled (NuGet package) form, in your
+    own applications, including commercial applications, at no charge.
+
+You may NOT:
+
+  - Redistribute, sublicense, sell, or publish this software (or any
+    modified version of it) as a standalone product, library, or package,
+    including republishing it under a different name on NuGet.org or any
+    other package repository.
+  - Reverse engineer, decompile, or disassemble the compiled package except
+    to the extent applicable law expressly permits this despite this
+    limitation.
+  - Remove or alter any copyright, trademark, or other proprietary notices.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
