@@ -7,4 +7,7 @@ namespace SampleApp.ServiceB.Models;
 /// configures <c>RedisOptions.Queue</c> (and no in-memory channel), the envelope lands in a durable Redis
 /// Stream instead — it survives a restart of this process, unlike Service A's <c>/queue</c> demo.
 /// </summary>
-public sealed record ShipmentQueuedNotification(Guid OrderId, string Carrier) : INotification;
+public sealed record ShipmentQueuedNotification(
+    Guid OrderId,
+    string Carrier,
+    bool SimulateFailure = false) : INotification;

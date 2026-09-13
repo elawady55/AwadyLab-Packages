@@ -1,12 +1,15 @@
 using AwadyLab.Mediator;
 using AwadyLab.Mediator.Abstraction;
+using AwadyLab.Mediator.Abstraction.Messaging;
 using AwadyLab.Mediator.Enums;
 using AwadyLab.Mediator.RabbitMQ;
 using AwadyLab.Mediator.RabbitMQ.Options;
 using AwadyLab.Mediator.Redis;
 using AwadyLab.Mediator.Redis.Options;
 using SampleApp.Contracts;
+using SampleApp.ServiceB.Metrics;
 using SampleApp.ServiceB.Models;
+using SampleApp.ServiceB.Pipelines;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -15,8 +18,24 @@ var redisConnectionString = builder.Configuration.GetConnectionString("Redis") ?
 var rabbitMqConnectionString = builder.Configuration.GetConnectionString("RabbitMq")
     ?? "amqp://guest:guest@localhost:5672/";
 
+// Register Performance & Observability Metrics Collector and Custom Handlers
+builder.Services.AddSingleton<ServiceBMetrics>();
+builder.Services.AddSingleton<INotificationErrorHandler, MetricsNotificationErrorHandler>();
+builder.Services.AddSingleton<IDeadLetterSink, MetricsDeadLetterSink>();
+
 builder.Services.AddMediator([typeof(Program).Assembly, typeof(OrderPlacedNotification).Assembly], options =>
 {
+    // Notification pipeline behavior: measures latency, active in-flight executions, and success/failure metrics
+    options.NotificationPipelines.Add(typeof(PerformanceMetricsNotificationPipelineBehavior<>));
+
+    // Configure retry parameters for background queue processing
+    options.UseNotificationQueue(queue =>
+    {
+        queue.MaxRetries = 3;
+        queue.RetryDelay = TimeSpan.FromMilliseconds(300);
+        queue.MaxRetryDelay = TimeSpan.FromSeconds(2);
+    });
+
     // Redis Queue mode: a durable Redis Stream backs NotificationDelivery.Queue instead of the in-memory
     // channel Service A uses — this is the only queue this service has, so /shipments always goes through it.
     options.UseRedis(new RedisOptions
@@ -36,12 +55,42 @@ builder.Services.AddMediator([typeof(Program).Assembly, typeof(OrderPlacedNotifi
 
 var app = builder.Build();
 
-app.MapPost("/shipments", async (IMediator mediator, CancellationToken cancellationToken) =>
-{
-    await mediator.Publish(new ShipmentQueuedNotification(Guid.NewGuid(), "AwadyLab Express"),
-        options => options.Delivery = NotificationDelivery.Queue, cancellationToken);
+// Expose JSON Metrics Dashboard for live observability
+app.MapGet("/metrics", (ServiceBMetrics metrics) => Results.Ok(metrics.GetSnapshot()));
 
-    return Results.Ok("Enqueued to the durable Redis Stream — ShipmentQueuedHandler will run off the background pump.");
+// Reset metrics counters for clean interactive testing
+app.MapPost("/metrics/reset", (ServiceBMetrics metrics) =>
+{
+    metrics.Reset();
+    return Results.Ok(new { message = "Metrics counters successfully reset." });
+});
+
+app.MapPost("/shipments", async (IMediator mediator, bool simulateFailure = false, CancellationToken cancellationToken = default) =>
+{
+    var orderId = Guid.NewGuid();
+    await mediator.Publish(
+        new ShipmentQueuedNotification(orderId, "AwadyLab Express", SimulateFailure: simulateFailure),
+        options => options.Delivery = NotificationDelivery.Queue,
+        cancellationToken);
+
+    if (simulateFailure)
+    {
+        return Results.Ok(new
+        {
+            orderId,
+            simulateFailure = true,
+            status = "Enqueued with simulated failure",
+            note = "Watch console for retry attempts (1..3) and dead-letter sink routing, then inspect GET /metrics."
+        });
+    }
+
+    return Results.Ok(new
+    {
+        orderId,
+        simulateFailure = false,
+        status = "Enqueued to durable Redis Stream",
+        note = "ShipmentQueuedHandler will run off the background pump, and duration/success will be recorded in GET /metrics."
+    });
 });
 
 app.Run();

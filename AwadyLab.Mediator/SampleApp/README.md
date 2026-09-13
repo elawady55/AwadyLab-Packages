@@ -1,7 +1,6 @@
 # AwadyLab.Mediator SampleApp
 
-A two-service, hands-on demonstration of `AwadyLab.Mediator`'s three notification delivery modes and two
-broker transports, working across real process boundaries — not just isolated snippets.
+A two-service, hands-on demonstration of `AwadyLab.Mediator`'s three notification delivery modes, notification pipeline behaviors, performance metrics & observability, and two broker transports, working across real process boundaries — not just isolated snippets.
 
 | | Service A (`:5001`) | Service B (`:5002`) |
 | :--- | :--- | :--- |
@@ -10,6 +9,8 @@ broker transports, working across real process boundaries — not just isolated 
 | Queue delivery (durable Redis Stream) | — | ✅ `POST /shipments` |
 | Broker delivery (RabbitMQ) | ✅ publishes, `POST /orders` | ✅ consumes, no endpoint — watch the console |
 | Request/Response (`IRequestMediator`) | ✅ `POST /orders` | — |
+| Notification Pipeline (`[Idempotent]`) | ✅ active on `POST /queue` (deduplication) | — |
+| Observability & Performance Metrics | — | ✅ `GET /metrics`, OpenTelemetry `Meter`, retries & dead-letter tracking |
 
 Service A never has a local handler for `OrderPlacedNotification` — it's a producer-only participant in
 that notification's topology. Service B never publishes anything over RabbitMQ — it only subscribes.
@@ -57,16 +58,37 @@ curl -X POST http://localhost:5001/direct
 `InventoryCheckedHandler` runs synchronously, in-process, before the HTTP response returns. Look for the
 `[Direct]` log line in Service A's console — it appears immediately.
 
-### Queue delivery — internal in-memory channel (Service A)
+### Queue delivery & `[Idempotent]` Pipeline Behavior (Service A)
 
 ```bash
-curl -X POST http://localhost:5001/queue
+# 1. First call: executes normally
+curl -X POST "http://localhost:5001/queue?sku=WIDGET-1"
 ```
 
 The notification is enqueued to `AddMediator`'s default in-memory channel and drained by the background
-`NotificationQueuePump`. The `[Queue]` log line in Service A's console appears about a second *after* the
-response returns (the handler simulates work with a delay, to make the "ran later, off the request thread"
-point visible).
+`NotificationQueuePump`. Around the handler dispatch, `IdempotentNotificationPipelineBehavior` inspects
+`StockReorderRequestedNotification` for `[Idempotent(nameof(Sku))]`.
+
+Service A's console will log:
+```text
+info: SampleApp.ServiceA.Pipelines.IdempotentNotificationPipelineBehavior[0]
+      [Pipeline:Idempotent] First time seeing notification StockReorderRequestedNotification with key 'WIDGET-1'. Dispatching to handlers.
+info: SampleApp.ServiceA.Handlers.StockReorderHandler[0]
+      [Queue] Stock reorder processed off the background pump for WIDGET-1: 100 requested.
+```
+
+Now try sending the exact same SKU again:
+```bash
+# 2. Second call with same SKU: intercepted and dropped by the pipeline
+curl -X POST "http://localhost:5001/queue?sku=WIDGET-1"
+```
+
+Service A's console will show:
+```text
+warn: SampleApp.ServiceA.Pipelines.IdempotentNotificationPipelineBehavior[0]
+      [Pipeline:Idempotent] Duplicate notification detected for StockReorderRequestedNotification with key 'WIDGET-1'. Skipping handlers.
+```
+Notice `StockReorderHandler` is **not executed** because the pipeline intercepted and short-circuited the duplicate message.
 
 ### Queue delivery — durable Redis Stream (Service B)
 
@@ -98,6 +120,87 @@ Watch **Service B's** console — `OrderPlacedExternalHandler` (an `IExternalNot
 to its own `service-b.orders` queue) picks it up and logs `[Broker/RabbitMQ]`. There is no endpoint on
 Service B for this; it fires automatically whenever Service A publishes.
 
+### Performance Monitoring & Live Metrics (Service B)
+
+Service B incorporates end-to-end performance monitoring across its Redis Queue and RabbitMQ Broker consumers:
+* **`PerformanceMetricsNotificationPipelineBehavior<T>`**: Measures execution duration with high-precision timestamps, active in-flight counts, and records success/failure outcomes.
+* **`MetricsNotificationErrorHandler`**: Intercepts transient failure attempts (`willRetry = true`), tracking retry counts.
+* **`MetricsDeadLetterSink`**: Captures messages after all retry attempts are exhausted (`IDeadLetterSink`).
+* **`ServiceBMetrics`**: Thread-safe collector publishing metrics via OpenTelemetry `System.Diagnostics.Metrics.Meter` and exposing a live JSON snapshot.
+
+#### 1. Inspect Current Metrics
+
+```bash
+curl http://localhost:5002/metrics
+```
+
+Output:
+```json
+{
+  "summary": {
+    "totalExecutions": 1,
+    "successfulExecutions": 1,
+    "failedExecutions": 0,
+    "retryAttempts": 0,
+    "deadLetteredExecutions": 0,
+    "inFlightExecutions": 0,
+    "successRatePercentage": 100.0,
+    "averageExecutionTimeMs": 2.45,
+    "minExecutionTimeMs": 2.45,
+    "maxExecutionTimeMs": 2.45,
+    "totalExecutionTimeMs": 2.45
+  },
+  "byNotification": {
+    "ShipmentQueuedNotification": {
+      "total": 1,
+      "success": 1,
+      "failed": 0,
+      "retryAttempts": 0,
+      "deadLettered": 0,
+      "averageExecutionTimeMs": 2.45,
+      "minExecutionTimeMs": 2.45,
+      "maxExecutionTimeMs": 2.45,
+      "lastExecutionUtc": "2026-09-13T17:20:00.1234567Z"
+    }
+  }
+}
+```
+
+#### 2. Trigger Simulated Failures & Retries
+
+Simulate a failing handler to observe automatic retries, backoff, and dead-letter sink routing:
+
+```bash
+curl -X POST "http://localhost:5002/shipments?simulateFailure=true"
+```
+
+In Service B's console, observe the initial failure, the retries via `MetricsNotificationErrorHandler`, and finally dead-letter sink routing:
+```text
+warn: SampleApp.ServiceB.Handlers.ShipmentQueuedHandler[0]
+      [Redis Queue] Simulating handler failure for shipment of order ...
+warn: SampleApp.ServiceB.Metrics.MetricsNotificationErrorHandler[0]
+      [Metrics:Retry] Attempt #1 for ShipmentQueuedNotification failed: ... Will retry according to backoff policy.
+warn: SampleApp.ServiceB.Metrics.MetricsNotificationErrorHandler[0]
+      [Metrics:Retry] Attempt #2 for ShipmentQueuedNotification failed: ... Will retry according to backoff policy.
+error: SampleApp.ServiceB.Metrics.MetricsNotificationErrorHandler[0]
+      [Metrics:RetryExhausted] Attempt #3 for ShipmentQueuedNotification failed: ... Retries exhausted; transferring to dead-letter sink.
+error: SampleApp.ServiceB.Metrics.MetricsDeadLetterSink[0]
+      [Metrics:DeadLetter] Notification ShipmentQueuedNotification permanently failed after 3 attempts. Routed to Dead-Letter Sink.
+```
+
+Now re-query `/metrics`:
+```bash
+curl http://localhost:5002/metrics
+```
+
+Notice that `failedExecutions`, `retryAttempts`, and `deadLetteredExecutions` reflect the retry attempts and failure rate.
+
+#### 3. Reset Metrics
+
+```bash
+curl -X POST http://localhost:5002/metrics/reset
+```
+
 ## Project layout
 
 ```
@@ -105,8 +208,8 @@ SampleApp/
   docker-compose.yml           # RabbitMQ + Redis, infra only — the .NET services run via `dotnet run`
   SampleApp.Contracts/         # OrderPlacedNotification + its RabbitMQ topology (OrderPlacedDefinition) —
                                 #   the one thing both services must compile against identically
-  SampleApp.ServiceA/          # Direct, internal-channel Queue, RabbitMQ Broker (publish), Request/Response
-  SampleApp.ServiceB/          # Redis Queue, RabbitMQ Broker (consume)
+  SampleApp.ServiceA/          # Direct, internal-channel Queue, RabbitMQ Broker (publish), Request/Response, [Idempotent] Pipeline
+  SampleApp.ServiceB/          # Redis Queue, RabbitMQ Broker (consume), Live Metrics & Observability
 ```
 
 Everything specific to one service only (its own notification types, handlers, the request/response pair)

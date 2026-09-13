@@ -143,14 +143,15 @@ public class DeleteUserHandler(IUserRepository repo) : IRequestHandler<DeleteUse
 
 ### Pipeline Behaviors (`IPipelineBehaviorHandler<,>`)
 
-Pipelines execute in the **exact order that they are registered** in `options.ExecutorPipelines`. For example:
+Pipelines execute in the **exact order that they are registered** in `options.ExecutorPipelines`. Standard cross-cutting concerns like logging, execution measurement (timing), and validation are standard and trivial to chain:
 
 ```csharp
-options.ExecutorPipelines.Add(typeof(LoggingPipeline<,>));    // Outer pipeline: runs first
-options.ExecutorPipelines.Add(typeof(ValidationPipeline<,>)); // Inner pipeline: runs second
+options.ExecutorPipelines.Add(typeof(LoggingPipeline<,>));              // Runs 1st: logs entry and exit
+options.ExecutorPipelines.Add(typeof(ExecutionMeasurementPipeline<,>)); // Runs 2nd: measures execution latency
+options.ExecutorPipelines.Add(typeof(ValidationPipeline<,>));           // Runs 3rd: validates incoming command
 ```
 
-When a request is executed, it passes through `LoggingPipeline` before `next()` enters `ValidationPipeline`. On completion, the response unwinds in reverse order. Order your cross-cutting concerns deliberately (e.g., global exception handling outermost, logging second, validation third).
+When a request is executed, it passes through `LoggingPipeline` and `ExecutionMeasurementPipeline` before `next()` enters `ValidationPipeline`. On completion, the response unwinds in reverse order. Order your cross-cutting concerns deliberately (e.g., global exception handling outermost, logging second, timing third, validation fourth).
 
 ```csharp
 public class LoggingPipeline<TRequest, TResponse>(ILogger<LoggingPipeline<TRequest, TResponse>> logger)
@@ -170,6 +171,11 @@ public class LoggingPipeline<TRequest, TResponse>(ILogger<LoggingPipeline<TReque
     }
 }
 ```
+
+> [!NOTE]
+> Standard middlewares like **logging**, **execution measurement (timing/metrics)**, and **validation** are standard, everyday building blocks supported out-of-the-box. Beyond basic telemetry, pipelines in `AwadyLab.Mediator` also support complex control flows, conditional short-circuiting, and distributed resilience.
+>
+> For a complex, production-grade demonstration featuring attribute-based idempotency and duplicate suppression across asynchronous dispatches, see [Notification Pipeline Behaviors (Idempotency & Deduplication)](#4-notification-pipeline-behaviors-inotificationpipelinebehavior).
 
 ---
 
@@ -195,8 +201,7 @@ public class StreamMetricsHandler : IStreamRequestHandler<StreamMetricsRequest, 
         StreamMetricsRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        for (var i = 0; i < 100; i++)
-        {
+        for (var i = 0; i < 100; i++)\n        {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(50, cancellationToken);
             yield return new(DateTime.UtcNow, Random.Shared.NextDouble());
@@ -434,6 +439,140 @@ public class BillingOrderHandler(IBillingService billing) : IExternalNotificatio
 > [!NOTE]
 > **Execution Mode & Scope**: Inbound broker messages are received directly by the background subscription worker (`BrokerSubscriptionService`). Handlers execute in **parallel with an isolated `IServiceScope` per handler**, completely independent of any caller or HTTP request context.
 
+### 4. Notification Pipeline Behaviors (`INotificationPipelineBehavior<>`)
+
+Standard cross-cutting concerns like **logging**, **execution measurement (timing)**, and **validation** are standard and trivial in modern mediator libraries. However, pipeline behaviors in `AwadyLab.Mediator` excel when addressing complex distributed architecture problems — such as **enforcing idempotency and message deduplication** across asynchronous dispatches.
+
+Because queue and broker deliveries operate under **at-least-once** delivery guarantees, redeliveries or rapid duplicate publishes can trigger redundant or hazardous side-effects (e.g., duplicate stock reorders or repeated charges). Rather than polluting every single notification handler with deduplication boilerplate, a custom [`INotificationPipelineBehavior<TNotification>`](file:///C:/Users/Awady/Repos/a1-packages/AwadyLab.Mediator/AwadyLab.Mediator/Abstraction/INotificationPipelineBehavior.cs) cleanly intercepts dispatches, extracts message identity keys, checks a deduplication store, and **short-circuits** execution before handlers are invoked.
+
+#### 1. Define the Idempotent Attribute
+
+An attribute placed on notification types to declaratively designate idempotency and specify which property acts as the unique partition key:
+
+```csharp
+namespace SampleApp.ServiceA.Pipelines;
+
+/// <summary>
+/// Marks a notification type as requiring idempotent processing.
+/// Duplicate publications with the same key will be deduplicated and skipped by the pipeline.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class)]
+public sealed class IdempotentAttribute(string? keyProperty = null) : Attribute
+{
+    public string? KeyProperty { get; } = keyProperty;
+}
+```
+
+#### 2. Implement the Generic Pipeline Behavior
+
+The behavior implements [`INotificationPipelineBehavior<TNotification>`](file:///C:/Users/Awady/Repos/a1-packages/AwadyLab.Mediator/AwadyLab.Mediator/Abstraction/INotificationPipelineBehavior.cs). If marked with `[Idempotent]`, it extracts the key (by configured property name or standard conventions: `Id`, `Key`, `Sku`), checks the deduplication store, and short-circuits execution without calling `await next()`:
+
+```csharp
+using System.Collections.Concurrent;
+using System.Reflection;
+using AwadyLab.Mediator.Abstraction;
+
+namespace SampleApp.ServiceA.Pipelines;
+
+/// <summary>
+/// A notification pipeline behavior that enforces idempotency for notifications marked with
+/// <see cref="IdempotentAttribute"/>.
+/// </summary>
+public sealed class IdempotentNotificationPipelineBehavior<TNotification>(
+    ILogger<IdempotentNotificationPipelineBehavior<TNotification>> logger)
+    : INotificationPipelineBehavior<TNotification>
+    where TNotification : INotification
+{
+    // Thread-safe in-memory store tracking processed notification keys.
+    // In distributed multi-replica environments, this can be backed by Redis or an external distributed cache.
+    private static readonly ConcurrentDictionary<string, byte> ProcessedKeys = new();
+
+    public async Task HandleAsync(
+        TNotification notification,
+        NotificationHandlerDelegate next,
+        CancellationToken cancellationToken)
+    {
+        var attribute = typeof(TNotification).GetCustomAttribute<IdempotentAttribute>();
+        if (attribute is null)
+        {
+            // Unmarked notification: pass straight through without idempotency checks
+            await next();
+            return;
+        }
+
+        var key = ExtractKey(notification, attribute.KeyProperty);
+        var cacheKey = $"{typeof(TNotification).Name}:{key}";
+
+        if (!ProcessedKeys.TryAdd(cacheKey, 0))
+        {
+            logger.LogWarning(
+                "[Pipeline:Idempotent] Duplicate notification detected for {NotificationType} with key '{Key}'. Skipping handlers.",
+                typeof(TNotification).Name, key);
+            return; // Deduplicated: short-circuit without calling next()!
+        }
+
+        logger.LogInformation(
+            "[Pipeline:Idempotent] First time seeing notification {NotificationType} with key '{Key}'. Dispatching to handlers.",
+            typeof(TNotification).Name, key);
+
+        await next();
+    }
+
+    private static string ExtractKey(TNotification notification, string? configuredProperty)
+    {
+        var type = typeof(TNotification);
+
+        if (!string.IsNullOrWhiteSpace(configuredProperty))
+        {
+            var prop = type.GetProperty(configuredProperty, BindingFlags.Public | BindingFlags.Instance);
+            if (prop != null)
+                return prop.GetValue(notification)?.ToString() ?? string.Empty;
+        }
+
+        foreach (var candidate in new[] { "Id", "Key", "Sku" })
+        {
+            var prop = type.GetProperty(candidate, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            if (prop != null)
+                return prop.GetValue(notification)?.ToString() ?? string.Empty;
+        }
+
+        return notification.ToString() ?? type.Name;
+    }
+}
+```
+
+#### 3. Mark Notifications Declaratively
+
+```csharp
+// Deduplicate stock reorder notifications using the 'Sku' property
+[Idempotent(nameof(Sku))]
+public sealed record StockReorderRequestedNotification(string Sku, int Quantity) : INotification;
+```
+
+#### 4. Register in DI via `NotificationPipelines`
+
+Register the open-generic pipeline behavior in `MediatorOptions`:
+
+```csharp
+builder.Services.AddMediator([typeof(Program).Assembly], options =>
+{
+    // Notification pipeline: runs around notification handlers across Direct and Queue dispatches
+    options.NotificationPipelines.Add(typeof(IdempotentNotificationPipelineBehavior<>));
+});
+```
+
+When duplicate notifications arrive (via Direct in-process dispatches or background channel queue pumps), the pipeline intercepts them and logs a warning while skipping handler execution entirely:
+
+```text
+info: SampleApp.ServiceA.Pipelines.IdempotentNotificationPipelineBehavior[0]
+      [Pipeline:Idempotent] First time seeing notification StockReorderRequestedNotification with key 'WIDGET-1'. Dispatching to handlers.
+info: SampleApp.ServiceA.Handlers.StockReorderHandler[0]
+      [Queue] Stock reorder processed off the background pump for WIDGET-1: 100 requested.
+
+warn: SampleApp.ServiceA.Pipelines.IdempotentNotificationPipelineBehavior[0]
+      [Pipeline:Idempotent] Duplicate notification detected for StockReorderRequestedNotification with key 'WIDGET-1'. Skipping handlers.
+```
+
 ---
 
 ## 4. Unified Facade (`IMediator`)
@@ -469,6 +608,123 @@ public class OrdersController(IMediator mediator) : ControllerBase
         // 3. Async Streaming
         mediator.ExecuteAsync(new StreamMetricsRequest(42), ct);
 }
+```
+
+---
+
+## 5. Observability & Performance Metrics
+
+`AwadyLab.Mediator` provides first-class extension points for deep performance monitoring and production observability. By combining **Pipeline Behaviors**, **Error Handlers**, and **Dead-Letter Sinks**, you can capture runtime metrics across direct in-process, background channel, and distributed broker dispatches:
+
+* **Success & Failure Counts**: Track successful executions vs. thrown exceptions.
+* **Latency & Execution Duration**: Measure average, minimum, and maximum handler execution times with high-precision `Stopwatch.GetTimestamp()`.
+* **Retries & Backoff Events**: Intercept transient delivery retries (`willRetry == true`) before messages are abandoned.
+* **Dead-Letter & Poison Messages**: Capture messages that exhausted all retry attempts (`IDeadLetterSink`).
+* **Active In-Flight Workloads**: Track concurrent active dispatches in real-time.
+* **OpenTelemetry & `System.Diagnostics.Metrics`**: Export counters and histograms to Prometheus, Grafana, Datadog, or Azure Application Insights.
+
+```mermaid
+flowchart LR
+    Disp["Dispatcher / Queue / Broker"] --> Pipe["PerformanceMetrics Pipeline<br/><i>measures duration &amp; in-flight</i>"]
+    Pipe --> H["Handler(s)"]
+    
+    H -- "Success" --> M1["Record Duration &amp; Success"]
+    H -- "Failure" --> Err["INotificationErrorHandler<br/><i>tracks retries &amp; backoff</i>"]
+    Err -- "Retries Exhausted" --> DLQ["IDeadLetterSink<br/><i>tracks dead-letter count</i>"]
+```
+
+### 1. Performance Metrics Pipeline Behavior
+
+Measures execution duration, tracks active in-flight count, and records success or failure:
+
+```csharp
+public sealed class PerformanceMetricsNotificationPipelineBehavior<TNotification>(
+    ServiceBMetrics metrics)
+    : INotificationPipelineBehavior<TNotification>
+    where TNotification : INotification
+{
+    public async Task HandleAsync(
+        TNotification notification,
+        NotificationHandlerDelegate next,
+        CancellationToken cancellationToken)
+    {
+        var typeName = typeof(TNotification).Name;
+        metrics.RecordExecutionStart(typeName);
+        var start = Stopwatch.GetTimestamp();
+
+        try
+        {
+            await next();
+            var durationMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            metrics.RecordExecutionCompleted(typeName, durationMs, success: true);
+        }
+        catch (Exception ex)
+        {
+            var durationMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            metrics.RecordExecutionCompleted(typeName, durationMs, success: false);
+            throw; // Re-throw to allow queue/broker retry mechanisms to engage
+        }
+    }
+}
+```
+
+### 2. Tracking Retries via `INotificationErrorHandler`
+
+Whenever a handler throws an exception during queue or broker dispatch, `INotificationErrorHandler` is notified with `willRetry`:
+
+```csharp
+public sealed class MetricsNotificationErrorHandler(
+    ServiceBMetrics metrics,
+    ILogger<MetricsNotificationErrorHandler> logger)
+    : INotificationErrorHandler
+{
+    public Task OnDispatchFailedAsync(
+        NotificationEnvelope envelope,
+        Exception exception,
+        bool willRetry,
+        CancellationToken cancellationToken)
+    {
+        metrics.RecordRetry(envelope.NotificationType.Name, envelope.Attempt, willRetry);
+        return Task.CompletedTask;
+    }
+}
+```
+
+### 3. Tracking Poison Messages via `IDeadLetterSink`
+
+When all configured retries are exhausted, the envelope is sent to `IDeadLetterSink`:
+
+```csharp
+public sealed class MetricsDeadLetterSink(
+    ServiceBMetrics metrics,
+    ILogger<MetricsDeadLetterSink> logger)
+    : IDeadLetterSink
+{
+    public Task SendAsync(
+        NotificationEnvelope envelope,
+        Exception lastException,
+        CancellationToken cancellationToken)
+    {
+        metrics.RecordDeadLetter(envelope.NotificationType.Name);
+        return Task.CompletedTask;
+    }
+}
+```
+
+### 4. Registering in DI
+
+Register your custom metrics services and pipeline behaviors in `Program.cs`:
+
+```csharp
+builder.Services.AddSingleton<ServiceBMetrics>();
+builder.Services.AddSingleton<INotificationErrorHandler, MetricsNotificationErrorHandler>();
+builder.Services.AddSingleton<IDeadLetterSink, MetricsDeadLetterSink>();
+
+builder.Services.AddMediator([typeof(Program).Assembly], options =>
+{
+    // Register metrics pipeline behavior
+    options.NotificationPipelines.Add(typeof(PerformanceMetricsNotificationPipelineBehavior<>));
+});
 ```
 
 ---

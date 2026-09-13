@@ -5,11 +5,16 @@ using AwadyLab.Mediator.RabbitMQ;
 using AwadyLab.Mediator.RabbitMQ.Options;
 using SampleApp.Contracts;
 using SampleApp.ServiceA.Models;
+using SampleApp.ServiceA.Pipelines;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddMediator([typeof(Program).Assembly, typeof(OrderPlacedNotification).Assembly], options =>
 {
+    // Notification pipeline: runs around notification handlers.
+    // IdempotentNotificationPipelineBehavior inspects [Idempotent] on notification classes.
+    options.NotificationPipelines.Add(typeof(IdempotentNotificationPipelineBehavior<>));
+
     // Queue mode: the internal in-memory channel that backs /queue. Explicit here (rather than left to
     // AddMediator's automatic enable-on-broker fallback) so the intent reads clearly next to UseRabbitMq.
     options.UseNotificationQueue();
@@ -35,12 +40,13 @@ app.MapPost("/direct", async (IMediator mediator, CancellationToken cancellation
     return Results.Ok("Published with Direct delivery — InventoryCheckedHandler already ran before this response.");
 });
 
-app.MapPost("/queue", async (IMediator mediator, CancellationToken cancellationToken) =>
+app.MapPost("/queue", async (IMediator mediator, string? sku, CancellationToken cancellationToken) =>
 {
-    await mediator.Publish(new StockReorderRequestedNotification("WIDGET-1", 100),
+    var itemSku = string.IsNullOrWhiteSpace(sku) ? "WIDGET-1" : sku;
+    await mediator.Publish(new StockReorderRequestedNotification(itemSku, 100),
         options => options.Delivery = NotificationDelivery.Queue, cancellationToken);
 
-    return Results.Ok("Enqueued with Queue delivery — StockReorderHandler will run off the background pump; check this service's console in a moment.");
+    return Results.Ok($"Enqueued with Queue delivery for '{itemSku}' — StockReorderHandler will run off the background pump (duplicates will be skipped by [Idempotent] pipeline); check console.");
 });
 
 app.MapPost("/orders", async (IMediator mediator, CreateOrderRequest request, CancellationToken cancellationToken) =>
