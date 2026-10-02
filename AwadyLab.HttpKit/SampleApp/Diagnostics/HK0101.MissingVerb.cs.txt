@@ -1,0 +1,14 @@
+using System.Threading;
+using System.Threading.Tasks;
+using AwadyLab.HttpKit.Contracts;
+
+namespace Diagnostics;
+
+public sealed record User(int Id, string Name);
+
+[HttpKitContract]
+public interface IUsersApi
+{
+    // HK0101: every contract method needs [Get], [Post], [Put], [Patch], [Delete] or [Head].
+    Task<User?> GetAsync(int id, CancellationToken cancellationToken = default);
+}

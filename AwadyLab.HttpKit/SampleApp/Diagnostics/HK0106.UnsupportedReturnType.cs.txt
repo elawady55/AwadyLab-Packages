@@ -1,0 +1,15 @@
+using System.Threading;
+using System.Threading.Tasks;
+using AwadyLab.HttpKit.Contracts;
+
+namespace Diagnostics;
+
+public sealed record User(int Id, string Name);
+
+[HttpKitContract]
+public interface IUsersApi
+{
+    // HK0106: ValueTask is not supported — the helpers return Task.
+    [Get("users/{id}")]
+    ValueTask<User?> GetAsync(int id, CancellationToken cancellationToken = default);
+}

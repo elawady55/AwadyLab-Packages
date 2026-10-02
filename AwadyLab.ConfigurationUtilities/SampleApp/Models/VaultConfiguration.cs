@@ -1,10 +1,8 @@
-﻿using System.ComponentModel.DataAnnotations;
-using AwadyLab.ConfigurationUtilities;
-using AwadyLab.ConfigurationUtilities.Core;
+﻿using AwadyLab.ConfigurationUtilities;
+using AwadyLab.ConfigurationUtilities.Binding;
 using AwadyLab.ConfigurationUtilities.EnvironmentVariables;
-using FluentValidation;
 
-namespace VaultAgent.Models;
+namespace SampleApp.Models;
 
 public class VaultConfiguration : IAppSettings
 {

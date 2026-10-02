@@ -10,7 +10,7 @@ namespace SampleApp.ServiceA.Handlers;
 public sealed class StockReorderHandler(ILogger<StockReorderHandler> logger)
     : INotificationHandler<StockReorderRequestedNotification>
 {
-    public async Task Handle(StockReorderRequestedNotification notification, CancellationToken cancellationToken)
+    public async Task HandleAsync(StockReorderRequestedNotification notification, CancellationToken cancellationToken)
     {
         // Simulated work, to make the "this ran later, off the request thread" point visible.
         await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);

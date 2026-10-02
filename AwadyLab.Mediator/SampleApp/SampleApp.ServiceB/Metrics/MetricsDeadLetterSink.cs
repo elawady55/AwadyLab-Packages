@@ -21,7 +21,10 @@ public sealed class MetricsDeadLetterSink(
         metrics.RecordDeadLetter(notificationName);
 
         logger.LogError(
-            "[Metrics:DeadLetter] Notification {NotificationType} (MessageId: {MessageId}, Origin: {Origin}) permanently failed after {Attempts} attempts. Routed to Dead-Letter Sink. Last error: {ErrorMessage}",
+            """
+            [Metrics:DeadLetter] Notification {NotificationType} (MessageId: {MessageId}, Origin: {Origin})
+            permanently failed after {Attempts} attempts. Routed to Dead-Letter Sink. Last error: {ErrorMessage}
+            """,
             notificationName, envelope.MessageId, envelope.Origin, envelope.Attempt, lastException.Message);
 
         return Task.CompletedTask;

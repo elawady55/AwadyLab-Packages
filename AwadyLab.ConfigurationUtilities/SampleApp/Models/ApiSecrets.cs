@@ -1,4 +1,5 @@
 using AwadyLab.ConfigurationUtilities;
+using AwadyLab.ConfigurationUtilities.Binding;
 using AwadyLab.ConfigurationUtilities.Encryption;
 
 namespace SampleApp.Models;

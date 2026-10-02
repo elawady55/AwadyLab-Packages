@@ -1,0 +1,22 @@
+{
+  "mocks": [
+    {
+      "name": "one repository",
+      "request": { "method": "GET", "url": "https://api.github.com/repos/*/*" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "body": { "id": 1, "name": "httpkit", "fullName": "awadylab/httpkit" }
+      }
+    },
+    {
+      "name": "organisation repositories",
+      "request": { "method": "GET", "url": "https://api.github.com/orgs/*/repos*" },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "body": [{ "id": 1, "name": "httpkit", "fullName": "awadylab/httpkit" }]
+      }
+    }
+  ]
+}

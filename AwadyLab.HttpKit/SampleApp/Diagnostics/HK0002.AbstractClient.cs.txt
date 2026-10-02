@@ -1,0 +1,10 @@
+using System.Net.Http;
+using AwadyLab.HttpKit.Abstractions;
+
+namespace Diagnostics;
+
+// HK0002: a typed client must be concrete — IHttpClientFactory cannot construct an abstract class.
+public abstract class AbstractClient(HttpClient http) : ITypedHttpClient
+{
+    public HttpClient Http { get; } = http;
+}

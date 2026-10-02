@@ -1,0 +1,19 @@
+using System.Net.Http;
+using AwadyLab.HttpKit.Abstractions;
+using AwadyLab.HttpKit.Options;
+
+namespace Diagnostics;
+
+public sealed class UsersDefinition : ITypedHttpClientDefinition
+{
+    public void Configure(HttpKitClientOptions options) { }
+}
+
+// HK0003: exactly one ConfigureBy* attribute decides where a client's options come from.
+// Code fixes: "Remove [ConfigureByOptions]" / "Remove [ConfigureByDefinition]".
+[ConfigureByDefinition(typeof(UsersDefinition))]
+[ConfigureByOptions("Clients:Users")]
+public sealed class UsersClient(HttpClient http) : ITypedHttpClient
+{
+    public HttpClient Http { get; } = http;
+}

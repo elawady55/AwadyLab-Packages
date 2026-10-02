@@ -8,13 +8,13 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="AwadyLab.Mediator" Version="1.7.2" />
+        <PackageReference Include="AwadyLab.Mediator.RabbitMQ" Version="1.7.2" />
+        <PackageReference Include="AwadyLab.Mediator.Redis" Version="1.7.2" />
         <PackageReference Include="StackExchange.Redis" Version="2.8.24" />
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\AwadyLab.Mediator\AwadyLab.Mediator.csproj" />
-        <ProjectReference Include="..\..\AwadyLab.Mediator.RabbitMQ\AwadyLab.Mediator.RabbitMQ.csproj" />
-        <ProjectReference Include="..\..\AwadyLab.Mediator.Redis\AwadyLab.Mediator.Redis.csproj" />
         <ProjectReference Include="..\SampleApp.Contracts\SampleApp.Contracts.csproj" />
     </ItemGroup>
 

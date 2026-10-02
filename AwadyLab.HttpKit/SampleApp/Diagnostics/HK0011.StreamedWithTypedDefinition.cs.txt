@@ -1,0 +1,17 @@
+using System.Net.Http;
+using AwadyLab.HttpKit.Abstractions;
+using AwadyLab.HttpKit.Options;
+
+namespace Diagnostics;
+
+public sealed class TypedDefinition : ITypedHttpClientDefinition
+{
+    public void Configure(HttpKitClientOptions options) { }
+}
+
+// HK0011: a streamed client takes IStreamedHttpClientDefinition — it cannot express resilience or caching.
+[ConfigureByDefinition(typeof(TypedDefinition))]
+public sealed class EventsClient(HttpClient http) : IStreamedHttpClient
+{
+    public HttpClient Http { get; } = http;
+}

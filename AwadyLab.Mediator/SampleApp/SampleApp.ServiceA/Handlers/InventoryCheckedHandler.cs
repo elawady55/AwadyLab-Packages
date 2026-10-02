@@ -7,7 +7,7 @@ namespace SampleApp.ServiceA.Handlers;
 public sealed class InventoryCheckedHandler(ILogger<InventoryCheckedHandler> logger)
     : INotificationHandler<InventoryCheckedNotification>
 {
-    public Task Handle(InventoryCheckedNotification notification, CancellationToken cancellationToken)
+    public Task HandleAsync(InventoryCheckedNotification notification, CancellationToken cancellationToken)
     {
         logger.LogInformation(
             "[Direct] Inventory checked in-process for {Sku}: {Quantity} on hand.",

@@ -7,7 +7,7 @@ namespace SampleApp.ServiceB.Handlers;
 public sealed class ShipmentQueuedHandler(ILogger<ShipmentQueuedHandler> logger)
     : INotificationHandler<ShipmentQueuedNotification>
 {
-    public Task Handle(ShipmentQueuedNotification notification, CancellationToken cancellationToken)
+    public Task HandleAsync(ShipmentQueuedNotification notification, CancellationToken cancellationToken)
     {
         if (notification.SimulateFailure)
         {

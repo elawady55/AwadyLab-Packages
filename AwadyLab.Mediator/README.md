@@ -443,7 +443,7 @@ public class BillingOrderHandler(IBillingService billing) : IExternalNotificatio
 
 Standard cross-cutting concerns like **logging**, **execution measurement (timing)**, and **validation** are standard and trivial in modern mediator libraries. However, pipeline behaviors in `AwadyLab.Mediator` excel when addressing complex distributed architecture problems — such as **enforcing idempotency and message deduplication** across asynchronous dispatches.
 
-Because queue and broker deliveries operate under **at-least-once** delivery guarantees, redeliveries or rapid duplicate publishes can trigger redundant or hazardous side-effects (e.g., duplicate stock reorders or repeated charges). Rather than polluting every single notification handler with deduplication boilerplate, a custom [`INotificationPipelineBehavior<TNotification>`](file:///C:/Users/Awady/Repos/a1-packages/AwadyLab.Mediator/AwadyLab.Mediator/Abstraction/INotificationPipelineBehavior.cs) cleanly intercepts dispatches, extracts message identity keys, checks a deduplication store, and **short-circuits** execution before handlers are invoked.
+Because queue and broker deliveries operate under **at-least-once** delivery guarantees, redeliveries or rapid duplicate publishes can trigger redundant or hazardous side-effects (e.g., duplicate stock reorders or repeated charges). Rather than polluting every single notification handler with deduplication boilerplate, a custom `INotificationPipelineBehavior<TNotification>` cleanly intercepts dispatches, extracts message identity keys, checks a deduplication store, and **short-circuits** execution before handlers are invoked.
 
 #### 1. Define the Idempotent Attribute
 
@@ -465,7 +465,7 @@ public sealed class IdempotentAttribute(string? keyProperty = null) : Attribute
 
 #### 2. Implement the Generic Pipeline Behavior
 
-The behavior implements [`INotificationPipelineBehavior<TNotification>`](file:///C:/Users/Awady/Repos/a1-packages/AwadyLab.Mediator/AwadyLab.Mediator/Abstraction/INotificationPipelineBehavior.cs). If marked with `[Idempotent]`, it extracts the key (by configured property name or standard conventions: `Id`, `Key`, `Sku`), checks the deduplication store, and short-circuits execution without calling `await next()`:
+The behavior implements `INotificationPipelineBehavior<TNotification>`. If marked with `[Idempotent]`, it extracts the key (by configured property name or standard conventions: `Id`, `Key`, `Sku`), checks the deduplication store, and short-circuits execution without calling `await next()`:
 
 ```csharp
 using System.Collections.Concurrent;

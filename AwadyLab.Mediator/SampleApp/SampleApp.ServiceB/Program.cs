@@ -68,7 +68,7 @@ app.MapPost("/metrics/reset", (ServiceBMetrics metrics) =>
 app.MapPost("/shipments", async (IMediator mediator, bool simulateFailure = false, CancellationToken cancellationToken = default) =>
 {
     var orderId = Guid.NewGuid();
-    await mediator.Publish(
+    await mediator.PublishAsync(
         new ShipmentQueuedNotification(orderId, "AwadyLab Express", SimulateFailure: simulateFailure),
         options => options.Delivery = NotificationDelivery.Queue,
         cancellationToken);

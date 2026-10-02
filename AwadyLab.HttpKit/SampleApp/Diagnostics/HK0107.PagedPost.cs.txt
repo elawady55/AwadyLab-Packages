@@ -1,0 +1,18 @@
+using System.Collections.Generic;
+using System.Threading;
+using AwadyLab.HttpKit.Contracts;
+using AwadyLab.HttpKit.Pagination;
+
+namespace Diagnostics;
+
+public sealed record User(int Id, string Name);
+
+[HttpKitContract]
+public interface ISearchApi
+{
+    // HK0107: paging re-sends the request, and POST is not idempotent.
+    // Code fix: "Mark the method [Idempotent]".
+    [Post("search")]
+    [Paginated(typeof(CursorInBodyPagination<User>))]
+    IAsyncEnumerable<User> SearchAsync(CancellationToken cancellationToken = default);
+}

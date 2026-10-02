@@ -7,33 +7,39 @@ custom remote configuration sources, and bulk registration — all wired togethe
 pipeline per settings class, instead of you gluing `ConfigurationBinder`, `OptionsBuilder`, and
 `IPostConfigureOptions` together by hand every time.
 
-## Table of contents
+[![NuGet](https://img.shields.io/nuget/v/AwadyLab.ConfigurationUtilities.svg)](https://www.nuget.org/packages/AwadyLab.ConfigurationUtilities)
+![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)
+![Target](https://img.shields.io/badge/.NET-7.0%20%7C%208.0%20%7C%209.0%20%7C%2010.0-purple.svg)
+![Language](https://img.shields.io/badge/C%23-14-blue.svg)
+![License](https://img.shields.io/badge/license-Proprietary-blue.svg)
 
-- [Installation](#installation)
-- [The core idea](#the-core-idea)
-- [Feature: Bulk registration](#feature-bulk-registration)
-- [Feature: Environment-variable overrides](#feature-environment-variable-overrides)
-- [Feature: Forbidden-in-Production values](#feature-forbidden-in-production-values)
-- [Feature: Validation (three ways)](#feature-validation-three-ways)
-  - [1. DataAnnotations](#1-dataannotations)
-  - [2. Custom validation](#2-custom-validation)
-  - [3. FluentValidation](#3-fluentvalidation)
-- [Feature: Encrypted settings](#feature-encrypted-settings)
-  - [1. Producing the ciphertext](#1-producing-the-ciphertext)
-  - [2. Registering keys and marking properties](#2-registering-keys-and-marking-properties)
-  - [3. Changing the encryption algorithm](#3-changing-the-encryption-algorithm)
-- [Feature: Polymorphic (discriminated-union) binding](#feature-polymorphic-discriminated-union-binding)
-  - [1. A single polymorphic object](#1-a-single-polymorphic-object)
-  - [2. A collection of polymorphic objects](#2-a-collection-of-polymorphic-objects)
-- [Feature: Integrity signature verification](#feature-integrity-signature-verification)
-  - [Changing the verification algorithm/provider](#changing-the-verification-algorithmprovider)
-- [Feature: Custom configuration sources](#feature-custom-configuration-sources)
-  - [Beyond feature flags: key rotation and rotating integrity signatures](#beyond-feature-flags-key-rotation-and-rotating-integrity-signatures)
-    - [Key rotation](#key-rotation)
-    - [Rotating integrity signatures and certificates](#rotating-integrity-signatures-and-certificates)
-- [Custom pipeline steps](#custom-pipeline-steps)
-- [Error handling](#error-handling)
-- [License](#license)
+---
+
+## Overview
+
+Every settings class implements `IAppSettings` and is registered with a single call, `AddOptions<T>()`. That call
+binds the configuration section, runs every feature in this document as an ordered **pipeline step** against the
+bound model, and returns the model immediately — while the same model stays available through `IOptions<T>` and
+`IOptionsMonitor<T>`.
+
+### Key Highlights
+
+* **Fail Fast at Startup**: A missing section, a failing validator, a forbidden Production value or a bad
+  signature stops the app while it starts, instead of surfacing as a null reference three services downstream.
+* **Three Validation Layers**: DataAnnotations, a custom `Validate()` method and FluentValidation, in any
+  combination. FluentValidation stays an optional dependency, detected by reflection.
+* **Encrypted Secrets**: AES-GCM ciphertext in configuration, per property or for a whole section. A shipped
+  PowerShell script produces it, and keys can be resolved from DI.
+* **Environment-Variable Overrides**: `[EnvironmentVariable("NAME")]` lets a deployment override a value without
+  another appsettings file.
+* **Polymorphic Sections**: Interface- or abstract-typed properties and lists bind from a `"Type"` discriminator.
+* **Tamper-Evident Configuration**: A signature over the bound model is verified at startup, with X.509 by
+  default or any algorithm you plug in.
+* **Live Remote Sources**: `IAppSettingsProvider` feeds configuration from a remote service, with reload polling
+  that flows into `IOptionsMonitor<T>`.
+* **Bulk Registration**: One call registers every `IAppSettings` class in an assembly.
+
+---
 
 ## Installation
 
@@ -41,7 +47,11 @@ pipeline per settings class, instead of you gluing `ConfigurationBinder`, `Optio
 dotnet add package AwadyLab.ConfigurationUtilities
 ```
 
-## The core idea
+---
+
+## Quickstart
+
+### 1. Define a settings class
 
 Every settings class implements `IAppSettings`:
 
@@ -52,7 +62,7 @@ public interface IAppSettings
 }
 ```
 
-`Key` is the configuration section name. You register it with `AddOptions<T>()`:
+`Key` is the configuration section name:
 
 ```csharp
 public class DatabaseSettings : IAppSettings
@@ -64,6 +74,8 @@ public class DatabaseSettings : IAppSettings
 }
 ```
 
+### 2. Register it (`Program.cs`)
+
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
@@ -74,6 +86,10 @@ var db = builder.AddOptions<DatabaseSettings>(); // bound, validated, returned i
 
 `AddOptions<T>()` throws immediately if the `"Database"` section doesn't exist in configuration —
 missing config fails fast at startup, not with a null-reference three services downstream.
+
+---
+
+## 1. The Options Pipeline
 
 Every feature below is a **pipeline step** that `AddOptions<T>()` runs, in a fixed order, against
 the bound model. The default pipeline (always active, no opt-in needed) is:
@@ -98,14 +114,14 @@ builder.AddOptions<DatabaseSettings>(pipeline => pipeline
 
 The callback's `pipeline` parameter only exposes the steps that actually take options —
 `UseDataAnnotations`, `UseFluentValidation`, `UseIntegritySignature` — plus `Use<T>(...)` for
-adding your own custom step (see [Custom pipeline steps](#custom-pipeline-steps)). Binding,
+adding your own custom step (see [Custom Pipeline Steps](#10-custom-pipeline-steps)). Binding,
 encryption, environment overrides, and polymorphic resolution always run; there's nothing to tune
 about *whether* they run, only about what attributes you put on your model to opt individual
 properties into them.
 
 ---
 
-## Feature: Bulk registration
+## 2. Bulk Registration
 
 **Why.** A real application can have a dozen settings classes. Calling `AddOptions<T>()` once per
 type is repetitive, and it's easy to forget one.
@@ -149,7 +165,7 @@ builder.AddOptions<LicenseSettings>(pipeline => pipeline.UseIntegritySignature(n
 
 ---
 
-## Feature: Environment-variable overrides
+## 3. Environment-Variable Overrides
 
 **Why.** The twelve-factor pattern: config files hold defaults, environment variables hold
 per-deployment or secret overrides, without needing a different appsettings file per environment.
@@ -180,7 +196,7 @@ left alone.
 
 ---
 
-## Feature: Forbidden-in-Production values
+## 4. Forbidden-in-Production Values
 
 **Why.** Some values are fine for local development but must never reach production — a verbose
 log level, an "allow insecure connections" flag, a debug endpoint toggle. Catching that manually
@@ -210,7 +226,7 @@ decryption, so it always sees the final value — not a stale one.
 
 ---
 
-## Feature: Validation (three ways)
+## 5. Validation (Three Ways)
 
 There are three independent validation layers. You can use any combination on the same class; all
 apply automatically once you register the model (DataAnnotations and custom validation) or once you
@@ -317,26 +333,28 @@ instead:
 builder.AddOptions<DatabaseSettings>(pipeline => pipeline.UseFluentValidation(o => o.RequireValidator = true));
 ```
 
-> ℹ️ **Note:** FluentValidation runs once the host starts, via a single shared hosted service across
+> [!NOTE]
+> FluentValidation runs once the host starts, via a single shared hosted service across
 > every type using it — registering FluentValidation (or `UseIntegritySignature`, below) on ten
 > config types doesn't mean ten separate `IHostedService`s slowing down startup; they're aggregated
 > into one.
 
-> ⚠️ **Gotcha:** if you accidentally register two `IValidator<T>` implementations for the *same*
+> [!WARNING]
+> **Gotcha:** if you accidentally register two `IValidator<T>` implementations for the *same*
 > settings type, only the **last one registered** with DI is ever consulted (`GetService`, not
 > `GetServices`) — the earlier one is silently never run. This is a real DI resolution behavior, not
 > a bug in this package; just be aware of it if you see a validator "not firing."
 
 ---
 
-## Feature: Encrypted settings
+## 6. Encrypted Settings
 
 **Why.** Some config values (API keys, connection-string passwords) shouldn't sit in plaintext in
 `appsettings.json` or a repo. This lets you store ciphertext instead and decrypt it transparently as
 part of binding.
 
 **When.** Any secret that has to live in configuration at all — as opposed to being fetched fully
-out-of-band (for that, see [custom configuration sources](#feature-custom-configuration-sources)).
+out-of-band (for that, see [custom configuration sources](#9-custom-configuration-sources)).
 
 ### 1. Producing the ciphertext
 
@@ -416,7 +434,8 @@ public class WholeSectionSecret : IAppSettings
 }
 ```
 
-> ⚠️ **Known limitation:** `-Path` can encrypt *any* file, but the result is only usable if you feed
+> [!WARNING]
+> **Known limitation:** `-Path` can encrypt *any* file, but the result is only usable if you feed
 > it back in correctly. There's no supported way to point a whole configuration source at a bare
 > ciphertext file — the ciphertext always has to end up as the string value of a key inside a JSON
 > document (`{ "WholeSectionSecret": "<ciphertext>" }` above, not a standalone file containing nothing
@@ -472,7 +491,8 @@ public class ApiSecrets : IAppSettings
 }
 ```
 
-> ℹ️ **Note:** a key added via `AddKey` decrypts **eagerly** — the value returned by `AddOptions<T>()`
+> [!NOTE]
+> A key added via `AddKey` decrypts **eagerly** — the value returned by `AddOptions<T>()`
 > is already plaintext. A key only reachable through `UseKeyProvider` needs DI, so it can't run
 > until the host is built; that property stays ciphertext on the eagerly-returned model and only
 > decrypts once `IOptions<T>` is first resolved.
@@ -507,7 +527,8 @@ whichever key `AddAppSettingsEncryption` resolves as the `"Default"`-named key.
 A missing connection string name returns `null` rather than throwing. Calling this method without
 having called `AddAppSettingsEncryption` first throws — there's no decryptor to resolve.
 
-> ⚠️ **Known limitation:** *property-level* encryption (`[AppSettingsEncryption]` on a property) only
+> [!WARNING]
+> **Known limitation:** *property-level* encryption (`[AppSettingsEncryption]` on a property) only
 > works when that property's type is `string`. Binding runs *before* decryption, so if you mark a
 > non-string property (e.g. `int`), the plain `ConfigurationBinder` tries to parse the still-encrypted
 > ciphertext into that type first and throws, before decryption ever gets a chance to run.
@@ -535,7 +556,8 @@ builder.Services.AddSingleton<IAppSettingsDecryptor, MyDecryptor>();
 builder.AddAppSettingsEncryption(options => options.UseKeyProvider(...));
 ```
 
-> ⚠️ **Important caveat:** a custom `IAppSettingsDecryptor` only takes effect for keys resolved through
+> [!WARNING]
+> **Important caveat:** a custom `IAppSettingsDecryptor` only takes effect for keys resolved through
 > `UseKeyProvider` — the eager `AddKey` decryption pass runs before the host is built, with no DI
 > container available yet, so it always uses the built-in AES-GCM decryptor regardless of what's
 > registered. If you need a different algorithm to apply everywhere, register your keys only via
@@ -543,7 +565,7 @@ builder.AddAppSettingsEncryption(options => options.UseKeyProvider(...));
 
 ---
 
-## Feature: Polymorphic (discriminated-union) binding
+## 7. Polymorphic (Discriminated-Union) Binding
 
 **Why.** Configuration sometimes needs to describe "one of several shapes" — a notification channel
 that's either email or Slack, a storage backend that's either local disk or S3. Plain
@@ -619,14 +641,15 @@ a mix of channel types in the same list is fine.
 An unknown or missing discriminator (on a single object or on any list item) throws a clear
 `InvalidOperationException` at startup rather than binding something wrong silently.
 
-> ⚠️ **Known limitation:** the `[PolymorphicSection]` attribute is required. A `List<T>`/interface
+> [!WARNING]
+> **Known limitation:** the `[PolymorphicSection]` attribute is required. A `List<T>`/interface
 > property left unmarked isn't rejected — the plain `ConfigurationBinder` just silently binds it to
 > an **empty list**, since it can't construct the interface-typed elements and doesn't fail loudly
 > the way it does for a single object property. Always mark polymorphic collections explicitly.
 
 ---
 
-## Feature: Integrity signature verification
+## 8. Integrity Signature Verification
 
 **Why.** For configuration that must be tamper-evident — a license, an entitlement, anything you
 want cryptographic proof wasn't altered after it left wherever it was issued.
@@ -685,7 +708,7 @@ or anything else it needs from DI — the same escape hatch the encryption featu
 
 ---
 
-## Feature: Custom configuration sources
+## 9. Custom Configuration Sources
 
 **Why.** Sometimes config doesn't live in a file at all — it comes from a remote config service, a
 database row, a blob store. You still want it to flow through the exact same binding, validation,
@@ -820,7 +843,7 @@ inside a custom `Verifier` instead (see
 
 ---
 
-## Custom pipeline steps
+## 10. Custom Pipeline Steps
 
 **Why.** For the rare case where none of the above covers what you need, but you still want your
 logic to run as part of the same ordered pipeline (with access to the `WebApplicationBuilder`, the
@@ -852,7 +875,7 @@ everything else.
 
 ---
 
-## Error handling
+## Error Handling
 
 `AddOptions<T>()`/`AddOptionsInAssembly()` throw at startup, not later, for:
 
@@ -865,18 +888,25 @@ everything else.
   host startup if `ValidateOnStart` is on, which is the default for DataAnnotations)
 - A failed integrity signature check
 
+All three validation layers throw `OptionsValidationException`, whose `Failures` lists each message and
+`OptionsType` names the model. Configuration problems (a missing section, an unknown discriminator, a value
+forbidden in Production) throw `InvalidOperationException`.
+
 Example messages:
 
 ```
 Configuration section 'Database' not found in appsettings.json
 No PolymorphicOption registered for Type = 'Fax' on 'INotificationChannel' (property 'NotificationSettings.Channel').
-Options validation failed: JWT secret must be at least 32 characters
+JWT secret must be at least 32 characters
 'DockerMonitorSettings.AllowInsecureSocket' is set to 'True', which is forbidden in Production.
 ```
+
+---
 
 ## License
 
 Package by Mohamed Elawady
+
 ```
 Copyright (c) Mohamed Elawady. All rights reserved.
 

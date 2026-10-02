@@ -1,0 +1,15 @@
+using System.Threading;
+using System.Threading.Tasks;
+using AwadyLab.HttpKit.Contracts;
+
+namespace Diagnostics;
+
+public sealed record User(int Id, string Name);
+
+[HttpKitContract]
+public interface IUsersApi
+{
+    // HK0103: the route says {id}, but no parameter supplies it.
+    [Get("users/{id}")]
+    Task<User?> GetAsync(CancellationToken cancellationToken = default);
+}

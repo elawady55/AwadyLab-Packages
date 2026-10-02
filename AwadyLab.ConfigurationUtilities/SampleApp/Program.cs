@@ -10,7 +10,6 @@ using FluentValidation;
 using Microsoft.Extensions.Options;
 using SampleApp.Models;
 using SampleApp.Providers;
-using VaultAgent.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 var assembly = Assembly.GetExecutingAssembly();

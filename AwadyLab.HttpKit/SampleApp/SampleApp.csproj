@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <RootNamespace>SampleApp</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Fixtures are read from disk at run time when HttpKit:Testing:UseFixtures is on. -->
+        <Content Update="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The source generator and code fixes ship inside AwadyLab.HttpKit (analyzers/dotnet/cs). -->
+        <PackageReference Include="AwadyLab.HttpKit" Version="1.0.1" />
+        <PackageReference Include="AwadyLab.HttpKit.AspNetCore" Version="1.0.1" />
+        <PackageReference Include="AwadyLab.HttpKit.Testing" Version="1.0.1" />
+    </ItemGroup>
+
+</Project>

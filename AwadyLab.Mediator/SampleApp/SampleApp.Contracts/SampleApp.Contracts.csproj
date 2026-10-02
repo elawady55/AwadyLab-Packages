@@ -7,8 +7,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\AwadyLab.Mediator\AwadyLab.Mediator.csproj" />
-        <ProjectReference Include="..\..\AwadyLab.Mediator.RabbitMQ\AwadyLab.Mediator.RabbitMQ.csproj" />
+        <PackageReference Include="AwadyLab.Mediator" Version="1.7.2" />
+        <PackageReference Include="AwadyLab.Mediator.RabbitMQ" Version="1.7.2" />
     </ItemGroup>
 
 </Project>

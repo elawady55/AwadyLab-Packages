@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using AwadyLab.ConfigurationUtilities;
+using AwadyLab.ConfigurationUtilities.Binding;
 using AwadyLab.ConfigurationUtilities.ForbiddenInProduction;
 
 namespace SampleApp.Models;

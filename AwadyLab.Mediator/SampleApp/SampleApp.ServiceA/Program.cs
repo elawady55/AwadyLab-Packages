@@ -34,7 +34,7 @@ var app = builder.Build();
 
 app.MapPost("/direct", async (IMediator mediator, CancellationToken cancellationToken) =>
 {
-    await mediator.Publish(new InventoryCheckedNotification("WIDGET-1", 42),
+    await mediator.PublishAsync(new InventoryCheckedNotification("WIDGET-1", 42),
         options => options.Delivery = NotificationDelivery.Direct, cancellationToken);
 
     return Results.Ok("Published with Direct delivery — InventoryCheckedHandler already ran before this response.");
@@ -43,7 +43,7 @@ app.MapPost("/direct", async (IMediator mediator, CancellationToken cancellation
 app.MapPost("/queue", async (IMediator mediator, string? sku, CancellationToken cancellationToken) =>
 {
     var itemSku = string.IsNullOrWhiteSpace(sku) ? "WIDGET-1" : sku;
-    await mediator.Publish(new StockReorderRequestedNotification(itemSku, 100),
+    await mediator.PublishAsync(new StockReorderRequestedNotification(itemSku, 100),
         options => options.Delivery = NotificationDelivery.Queue, cancellationToken);
 
     return Results.Ok($"Enqueued with Queue delivery for '{itemSku}' — StockReorderHandler will run off the background pump (duplicates will be skipped by [Idempotent] pipeline); check console.");
@@ -51,13 +51,13 @@ app.MapPost("/queue", async (IMediator mediator, string? sku, CancellationToken 
 
 app.MapPost("/orders", async (IMediator mediator, CreateOrderRequest request, CancellationToken cancellationToken) =>
 {
-    var result = await mediator.Execute(new CreateOrderCommand(request.CustomerName, request.Sku, request.Quantity),
+    var result = await mediator.ExecuteAsync(new CreateOrderCommand(request.CustomerName, request.Sku, request.Quantity),
         cancellationToken);
 
     // Broker delivery: no handler for OrderPlacedNotification exists in this service at all — Service A is
     // a producer-only participant in this notification's topology. See ProducerOnlyContractTests in the
     // core test suite for the case this mirrors.
-    await mediator.Publish(new OrderPlacedNotification(result.OrderId, result.CustomerName, result.Total),
+    await mediator.PublishAsync(new OrderPlacedNotification(result.OrderId, result.CustomerName, result.Total),
         options => options.Delivery = NotificationDelivery.Broker, cancellationToken);
 
     return Results.Ok(result);

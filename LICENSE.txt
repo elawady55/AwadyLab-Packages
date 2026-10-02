@@ -1,4 +1,4 @@
-A1.ConfigurationUtilities License
+AwadyLab Packages License
 
 Copyright (c) Mohamed Elawady. All rights reserved.
 

@@ -59,8 +59,10 @@ public sealed class ServiceBMetrics
         lock (_timingLock)
         {
             _totalDurationMs += durationMs;
-            if (durationMs < _minDurationMs) _minDurationMs = durationMs;
-            if (durationMs > _maxDurationMs) _maxDurationMs = durationMs;
+            if (durationMs < _minDurationMs)
+                _minDurationMs = durationMs;
+            if (durationMs > _maxDurationMs)
+                _maxDurationMs = durationMs;
         }
 
         var status = success ? "success" : "failure";
@@ -186,8 +188,10 @@ public sealed class NotificationTypeMetrics
         lock (_lock)
         {
             _totalDur += durationMs;
-            if (durationMs < _minDur) _minDur = durationMs;
-            if (durationMs > _maxDur) _maxDur = durationMs;
+            if (durationMs < _minDur) 
+                _minDur = durationMs;
+            if (durationMs > _maxDur) 
+                _maxDur = durationMs;
             _lastExecutionUtc = DateTime.UtcNow;
         }
     }

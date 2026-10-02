@@ -1,0 +1,13 @@
+using System.Net.Http;
+using AwadyLab.HttpKit.Abstractions;
+
+namespace Diagnostics;
+
+public sealed class NotClientOptions;
+
+// HK0005: the options type must derive from HttpKitClientOptions.
+[ConfigureByOptions(typeof(NotClientOptions))]
+public sealed class UsersClient(HttpClient http) : ITypedHttpClient
+{
+    public HttpClient Http { get; } = http;
+}

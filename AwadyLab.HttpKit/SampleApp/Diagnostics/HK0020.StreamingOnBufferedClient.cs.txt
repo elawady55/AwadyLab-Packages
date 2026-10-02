@@ -1,0 +1,13 @@
+using System.Net.Http;
+using System.Threading.Tasks;
+using AwadyLab.HttpKit.Abstractions;
+using AwadyLab.HttpKit.Streaming;
+
+namespace Diagnostics;
+
+// HK0020: this compiles and runs, but the stream still goes through the buffering pipeline.
+// Implement IStreamedHttpClient instead.
+public sealed class ReportsClient(HttpClient http) : ITypedHttpClient
+{
+    public Task<HttpStreamResponse> DownloadAsync() => http.OpenStreamAsync("reports");
+}

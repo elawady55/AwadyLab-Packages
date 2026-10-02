@@ -9,7 +9,7 @@ public sealed class CreateOrderHandler(ILogger<CreateOrderHandler> logger)
     // Flat rate per unit, just so /orders has a Total worth looking at — there's no real pricing here.
     private const decimal UnitPrice = 9.99m;
 
-    public Task<OrderResult> Execute(CreateOrderCommand request, CancellationToken cancellationToken)
+    public Task<OrderResult> ExecuteAsync(CreateOrderCommand request, CancellationToken cancellationToken)
     {
         var orderId = Guid.NewGuid();
         var total = request.Quantity * UnitPrice;

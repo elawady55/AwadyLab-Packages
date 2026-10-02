@@ -16,7 +16,7 @@ public sealed class OrderPlacedExternalHandler(ILogger<OrderPlacedExternalHandle
     // OrderPlacedDefinition in the shared Contracts project.
     public static string QueueName => "service-b.orders";
 
-    public Task Handle(OrderPlacedNotification notification, CancellationToken cancellationToken)
+    public Task HandleAsync(OrderPlacedNotification notification, CancellationToken cancellationToken)
     {
         logger.LogInformation(
             "[Broker/RabbitMQ] Received order {OrderId} from Service A: {CustomerName}, total {Total:C}.",

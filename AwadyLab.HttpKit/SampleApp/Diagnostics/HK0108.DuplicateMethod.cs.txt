@@ -1,0 +1,18 @@
+using System.Threading;
+using System.Threading.Tasks;
+using AwadyLab.HttpKit.Contracts;
+
+namespace Diagnostics;
+
+public sealed record User(int Id, string Name);
+
+[HttpKitContract]
+public interface IUsersApi
+{
+    // HK0108: contract methods dispatch by name, so overloads are not supported.
+    [Get("users/{id}")]
+    Task<User?> GetAsync(int id, CancellationToken cancellationToken = default);
+
+    [Get("users")]
+    Task<User?> GetAsync(string name, CancellationToken cancellationToken = default);
+}
