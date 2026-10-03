@@ -18,7 +18,7 @@ Built on C# 14 extension members, so most of these appear as ordinary instance m
 
 | Area | What it covers |
 | :--- | :--- |
-| [Strings](#1-strings) | Span slicing, glob matching, whitespace, hashing |
+| [Strings](#1-strings) | Span slicing, glob matching, validation, masking, split-and-parse, whitespace, hashing |
 | [Enumerable](#2-enumerable) | Windowing, lag/lead, padding, sampling, safe materialisation |
 | [Collections](#3-collections) | `IsNullOrEmpty`, bulk `AddRange`, non-mutating `WithRange` |
 | [Dictionaries](#4-dictionaries) | `GetOrAdd`, `AddRange`, `RemoveWhere` |
@@ -28,11 +28,13 @@ Built on C# 14 extension members, so most of these appear as ordinary instance m
 | [Conversions](#8-conversions) | Fast, exception-free type conversion and primitive parsing |
 | [Guid](#9-guid) | base64url encoding |
 | [Enums](#10-enums) | Attributes, descriptions, flag decomposition |
-| [Tasks](#11-tasks) | `Then`, `FireAndForget` |
+| [Tasks](#11-tasks) | `Then`, `FireAndForget`, `Task.ExecuteWithTimeoutAsync`, `Task.ExecuteAtAsync` |
 | [Expressions](#12-expressions) | Predicate composition |
 | [Reflection](#13-reflection) | Assembly scanning, nullability |
 | [Random](#14-random) | Random string generation |
 | [Security](#15-security) | Certificate lookup, SAN enumeration, secure random strings |
+| [Streams and Base64](#16-streams-and-base64) | Chunked stream-to-Base64 encoding, Base64-to-stream decoding |
+| [XML](#17-xml) | `XmlKit`: a `JsonSerializer`-style facade over `XmlSerializer` |
 | [Benchmarks](#benchmarks) | BenchmarkDotNet results for the perf-sensitive members |
 
 ### Key Highlights
@@ -121,6 +123,65 @@ cause catastrophic backtracking.
 ```csharp
 "order-2024-01-02.json".IsLike("order-*.json");   // true
 "Report.PDF".IsLike("*.pdf", ignoreCase: true);   // true
+```
+
+### Validation
+
+| Member | Returns | Notes |
+|---|---|---|
+| `IsDigitsOnly()` | `bool` | ASCII `0`–`9` only, one vectorized scan; `false` when empty |
+| `IsNumeric(allowSigns = false, allowDecimal = false, allowExponent = false)` | `bool` | Optional leading `+`/`-`, one `.`, and scientific notation (`1.5e-3`); no whitespace, separators or `NaN` |
+| `IsBase64(urlSafe = false)` | `bool` | `Base64.IsValid` / `Base64Url.IsValid`; `false` when empty or whitespace |
+| `TryDecodeBase64(destination, out bytesWritten, urlSafe = false)` | `bool` | Decodes into a caller buffer; `false` on invalid input or a short buffer, never throws |
+
+All four are declared on `ReadOnlySpan<char>`. The first three also have `string?` overloads whose `true` result
+narrows the reference to non-null.
+
+```csharp
+"0042".IsDigitsOnly();                                    // true
+"-12.5".IsNumeric(allowSigns: true, allowDecimal: true);  // true
+"6.02E23".IsNumeric(allowDecimal: true, allowExponent: true);  // true
+"SGVsbG8=".IsBase64();                                    // true
+
+Span<byte> buffer = stackalloc byte[64];
+if (token.TryDecodeBase64(buffer, out var written, urlSafe: true))
+    Use(buffer[..written]);
+```
+
+### Masking
+
+| Member | Returns | Notes |
+|---|---|---|
+| `Mask(visibleStart = 0, visibleEnd = 0, maskChar = '*')` | `string` | Keeps both ends; masks **everything** when they would cover the whole string |
+| `MaskEmail(maskChar = '*')` | `string` | Keeps the first and last character of the local part and the whole domain |
+
+Both build the result in a single allocation with `string.Create`.
+
+```csharp
+"4111111111111111".Mask(visibleEnd: 4);   // "************1111"
+"jason@example.com".MaskEmail();          // "j***n@example.com"
+"not-an-email".MaskEmail();               // "************"  — not guessed at
+```
+
+### Split and parse
+
+Each segment is parsed straight from a slice with `ISpanParsable<T>` and the invariant culture, so no substrings
+or arrays are allocated.
+
+| Member | Returns | Notes |
+|---|---|---|
+| `TrySplitTwo<T1, T2>(separator, out first, out second)` | `bool` | Splits at the **first** separator |
+| `TrySplitAndParse<T>(separator, destination, out count)` | `bool` | Fills a caller buffer; `false` when a segment fails or it does not fit |
+| `SplitAndParse<T>(separator)` | `IEnumerable<T>` | Lazy; throws `FormatException` naming the segment's index, never its text |
+
+```csharp
+"1920x1080".TrySplitTwo("x", out int width, out int height);
+
+Span<int> ids = stackalloc int[16];
+if ("4,8,15,16,23,42".TrySplitAndParse(',', ids, out var count))
+    Process(ids[..count]);
+
+foreach (var price in "1.5;2.25;3".SplitAndParse<decimal>(';')) { }
 ```
 
 ### String members
@@ -470,6 +531,43 @@ BackgroundWork().FireAndForget(ex => logger.LogError(ex, "background work failed
 unobserved-task exception. Cancellation is swallowed. Available on `Task`, `Task<T>`, `ValueTask` and
 `ValueTask<T>`.
 
+### Running with a time limit
+
+`Task.ExecuteWithTimeoutAsync` runs an operation and throws `TimeoutException` if it has not finished in time:
+
+```csharp
+try
+{
+    var report = await Task.ExecuteWithTimeoutAsync(ct => BuildReportAsync(ct), TimeSpan.FromSeconds(30),
+        cancellationToken: requestAborted);
+}
+catch (TimeoutException) { /* took longer than 30 s */ }
+```
+
+| Outcome | What you get |
+|---|---|
+| Finishes in time | Its result (or its own exception, unchanged) |
+| Time runs out | `TimeoutException` — and the token the operation received is cancelled, so cooperative work stops |
+| Operation ignores its token | Still `TimeoutException` on time; the abandoned work's later failure is observed for you |
+| Caller cancels `cancellationToken` | `OperationCanceledException`, not a timeout |
+
+`Timeout.InfiniteTimeSpan` means no limit. Pass a `FakeTimeProvider` to test timeouts without waiting. For a task
+that is already running and cannot be cancelled, the BCL's `task.WaitAsync(timeout)` is the right tool; it stops
+waiting but cannot stop the work.
+
+### Running at a specific time
+
+`Task.ExecuteAtAsync` is a static extension member, so it is called on `Task` itself:
+
+```csharp
+await Task.ExecuteAtAsync(ct => SendReportAsync(ct), tomorrowAt9, cancellationToken: stopping);
+var rates = await Task.ExecuteAtAsync(ct => FetchRatesAsync(ct), marketOpen, timeProvider);
+```
+
+A due time in the past runs the action right away. The clock is re-read after each wait, so waits beyond
+`Task.Delay`'s ~49.7-day limit work. Cancellation before the action starts means it never runs. Pass a
+`FakeTimeProvider` to test scheduled code without real delays.
+
 ---
 
 ## 12. Expressions
@@ -576,6 +674,88 @@ has no private key, and `CryptographicException` when the private key exists but
 
 `TryFind` only swallows those two expected "no usable match" outcomes; a genuine infrastructure failure (e.g.
 the store itself cannot be opened) still propagates instead of being reported as "not found".
+
+---
+
+## 16. Streams and Base64
+
+```csharp
+await using var file = File.OpenRead("invoice.pdf");
+string base64 = await file.ToBase64StringAsync();          // never holds the raw file in memory
+
+await upload.ToBase64Async(responseWriter);                 // TextWriter: bounded memory for any size
+await upload.ToBase64Async(responseBody);                   // Stream: ASCII bytes, no detour through chars
+
+using MemoryStream decoded = base64.Base64ToStream();      // read-only, seekable, positioned at 0
+```
+
+| Member | Description |
+|---|---|
+| `ToBase64StringAsync(ct)` | Encodes from the current position to the end into one string |
+| `ToBase64Async(TextWriter, ct)` | Writes Base64 text chunk by chunk |
+| `ToBase64Async(Stream, ct)` | Writes Base64 as UTF-8 bytes with `Base64.EncodeToUtf8` |
+| `Base64ToStream()` | On `string` and `ReadOnlySpan<char>`: decodes into a `MemoryStream`; `FormatException` when invalid |
+
+Input is read in 48 KiB chunks — a multiple of 3, so no padding lands mid-output — and a short read is never
+mistaken for the end of the stream. `ToBase64StringAsync` sizes its pooled buffer exactly for a seekable stream.
+Pooled buffers are cleared before they are returned, because the payload may be sensitive.
+
+---
+
+## 17. XML
+
+`XmlKit` gives `XmlSerializer` the shape of `System.Text.Json.JsonSerializer`:
+
+```csharp
+string xml = XmlKit.Serialize(order);
+Order? copy = XmlKit.Deserialize<Order>(xml);
+
+await XmlKit.SerializeAsync(response.Body, order, cancellationToken: ct);
+Order? posted = await XmlKit.DeserializeAsync<Order>(request.Body, ct);
+```
+
+| Member | Description |
+|---|---|
+| `Serialize<T>(value, options?)` | To a string whose declaration says UTF-8 |
+| `Serialize<T>(utf8Stream, value, options?)` | To a stream, in `options.Encoding` (UTF-8 without BOM by default) |
+| `SerializeAsync<T>(utf8Stream, value, options?, ct)` | As above, with only asynchronous writes to the stream |
+| `Deserialize<T>(xml)` / `Deserialize<T>(utf8Stream)` | From a string or stream; `null` for an `xsi:nil` root |
+| `DeserializeAsync<T>(utf8Stream, ct)` | As above, with only asynchronous reads from the stream |
+
+Output is configured with `XmlKitOptions`, the counterpart of `JsonSerializerOptions`:
+
+```csharp
+private static readonly XmlKitOptions Pretty = new() { WriteIndented = true, OmitXmlDeclaration = true };
+
+string xml = XmlKit.Serialize(order, Pretty);
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `WriteIndented` | `false` | One element per line, indented |
+| `OmitXmlDeclaration` | `false` | Leaves out `<?xml ...?>` |
+| `Encoding` | UTF-8, no BOM | What the stream overloads write; the string overload always declares UTF-8 |
+
+Options are immutable once created, so share one instance (a `static readonly` field) rather than creating one
+per call. Only settings `XmlKit` can honour are offered: it never closes your stream and always writes
+synchronously, so neither is configurable.
+
+* **Cached serializers**: one `XmlSerializer` per type, created on first use and shared; all members are
+  thread-safe.
+* **Clean output**: the `xmlns:xsi` / `xmlns:xsd` declarations `XmlSerializer` adds by default are omitted.
+* **Exact text**: carriage returns are written as `&#xD;`, so `"a\r\nb"` round-trips instead of losing its `\r`,
+  and a string that starts with a byte-order mark (as `Encoding.GetString` leaves it) is accepted.
+* **Invalid text fails loudly**: a lone surrogate or an XML-illegal control character in a string throws
+  `InvalidOperationException` instead of producing a document that cannot be read back.
+* **Null collections**: as with any `XmlSerializer`, a collection property that was `null` comes back empty.
+* **Safe input**: DTDs are prohibited and no resolver is set, so a document cannot expand entities or fetch
+  external resources (XXE).
+* **Async without sync I/O**: `XmlSerializer` is synchronous, so the async members buffer the document in memory
+  and only touch the caller's stream asynchronously — what ASP.NET Core requires by default.
+* **Declared type wins**: as with `JsonSerializer`, `T` drives serialization, not the runtime type; derived types
+  need `[XmlInclude]` on the base.
+* **Errors**: malformed or mismatched documents throw `InvalidOperationException` with the cause as the inner
+  exception; types `XmlSerializer` cannot handle throw `InvalidOperationException` or `NotSupportedException`.
 
 ---
 
